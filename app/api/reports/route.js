@@ -6,7 +6,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
     const period = searchParams.get("period") || "30"
-    const subject = searchParams.get("subject") || "all"
+    const subjectId = searchParams.get("subject") || "all"
 
     const authHeader = request.headers.get("authorization")
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -21,33 +21,43 @@ export async function GET(request) {
     }
 
     const db = getDatabase()
-    const dateFilter = `datetime('now', '-${period} days')`
+    const dateFilter = `NOW() - INTERVAL ${parseInt(period)} DAY`
+    const subjectFilter = subjectId !== "all" ? `AND s.id = ${parseInt(subjectId)}` : ""
 
     // Overview statistics
+    const [[overviewUsers]] = await db.execute("SELECT COUNT(*) as count FROM users")
+    const [[overviewNewUsers]] = await db.execute(
+      `SELECT COUNT(*) as count FROM users WHERE created_at >= ${dateFilter}`,
+    )
+    const [[overviewQuizzes]] = await db.execute(
+      `SELECT COUNT(*) as count FROM quiz_attempts WHERE start_time >= ${dateFilter}`,
+    )
+    const [[overviewBattles]] = await db.execute(
+      `SELECT COUNT(*) as count FROM battles WHERE created_at >= ${dateFilter}`,
+    )
+    const [[overviewQuestions]] = await db.execute("SELECT COUNT(*) as count FROM questions")
+    const [[overviewActiveBattles]] = await db.execute(
+      "SELECT COUNT(*) as count FROM battles WHERE status = 'in_progress'",
+    )
+    const [[avgScoreResult]] = await db.execute(
+      `SELECT AVG(score) as avgScore FROM quiz_attempts WHERE start_time >= ${dateFilter}`,
+    )
+
     const overview = {
-      totalUsers: db.prepare("SELECT COUNT(*) as count FROM users").get().count,
-      newUsers: db.prepare(`SELECT COUNT(*) as count FROM users WHERE created_at >= ${dateFilter}`).get().count,
-      totalQuizzes: db.prepare(`SELECT COUNT(*) as count FROM quiz_attempts WHERE created_at >= ${dateFilter}`).get()
-        .count,
-      totalBattles: db.prepare(`SELECT COUNT(*) as count FROM battles WHERE created_at >= ${dateFilter}`).get().count,
-      totalQuestions: db.prepare("SELECT COUNT(*) as count FROM questions").get().count,
-      activeBattles: db.prepare("SELECT COUNT(*) as count FROM battles WHERE status = 'active'").get().count,
+      totalUsers: overviewUsers.count,
+      newUsers: overviewNewUsers.count,
+      totalQuizzes: overviewQuizzes.count,
+      totalBattles: overviewBattles.count,
+      totalQuestions: overviewQuestions.count,
+      activeBattles: overviewActiveBattles.count,
+      avgScore: Math.round(avgScoreResult.avgScore || 0),
     }
 
-    // Calculate average score
-    const avgScoreResult = db
-      .prepare(`
-      SELECT AVG(score) as avgScore 
-      FROM quiz_attempts 
-      WHERE created_at >= ${dateFilter}
-    `)
-      .get()
-    overview.avgScore = Math.round(avgScoreResult.avgScore || 0)
-
     // Quiz performance trends
-    const quizzes = db.prepare(`
+    const [quizzes] = await db.execute(
+      `
       SELECT 
-        DATE(qa.created_at) as date,
+        DATE(qa.start_time) as date,
         AVG(qa.score) as avgScore,
         COUNT(*) as attempts,
         q.title,
@@ -55,53 +65,47 @@ export async function GET(request) {
       FROM quiz_attempts qa
       JOIN quizzes q ON qa.quiz_id = q.id
       JOIN subjects s ON q.subject_id = s.id
-      WHERE qa.created_at >= ${dateFilter}
-      ${subject !== "all" ? "AND s.id = ?" : ""}
-      GROUP BY DATE(qa.created_at), q.id
-      ORDER BY qa.created_at DESC
-    `)
+      WHERE qa.start_time >= ${dateFilter} ${subjectFilter}
+      GROUP BY DATE(qa.start_time), q.id
+      ORDER BY date DESC
+    `,
+    )
 
-    const quizzesData = subject !== "all" ? quizzes.all(Number.parseInt(subject)) : quizzes.all()
-
-    // Battle statistics
-    const battles = db
-      .prepare(`
+    // Battle statistics (Top Champions)
+    const [battles] = await db.execute(
+      `
       SELECT 
-        DATE(b.created_at) as date,
-        COUNT(*) as battles,
         u.username,
-        COUNT(CASE WHEN b.winner_id = u.id THEN 1 END) as wins,
-        ROUND(COUNT(CASE WHEN b.winner_id = u.id THEN 1 END) * 100.0 / COUNT(*), 1) as winRate
-      FROM battles b
-      LEFT JOIN users u ON b.winner_id = u.id
-      WHERE b.created_at >= ${dateFilter}
-      GROUP BY DATE(b.created_at), u.id
-      ORDER BY b.created_at DESC
-    `)
-      .all()
+        COUNT(b.id) as wins
+      FROM users u
+      JOIN battles b ON u.id = b.winner_id
+      WHERE b.ended_at >= ${dateFilter}
+      GROUP BY u.id, u.username
+      ORDER BY wins DESC
+      LIMIT 5
+    `,
+    )
 
-    // User activity
-    const users = db
-      .prepare(`
+    // User activity report
+    const [users] = await db.execute(
+      `
       SELECT 
         u.username,
         u.email,
         u.role,
         COUNT(qa.id) as quizzesTaken,
-        ROUND(AVG(qa.score), 1) as avgScore,
-        DATE(u.created_at) as date,
-        COUNT(DISTINCT DATE(qa.created_at)) as activeUsers
+        ROUND(AVG(qa.score), 1) as avgScore
       FROM users u
-      LEFT JOIN quiz_attempts qa ON u.id = qa.user_id AND qa.created_at >= ${dateFilter}
-      WHERE u.created_at >= ${dateFilter}
+      LEFT JOIN quiz_attempts qa ON u.id = qa.user_id AND qa.start_time >= ${dateFilter}
       GROUP BY u.id
       ORDER BY quizzesTaken DESC
-    `)
-      .all()
+      LIMIT 10
+    `,
+    )
 
     // Subject performance
-    const subjects = db
-      .prepare(`
+    const [subjects] = await db.execute(
+      `
       SELECT 
         s.id,
         s.name,
@@ -110,41 +114,15 @@ export async function GET(request) {
       FROM subjects s
       LEFT JOIN questions q ON s.id = q.subject_id
       LEFT JOIN quizzes qz ON s.id = qz.subject_id
-      LEFT JOIN quiz_attempts qa ON qz.id = qa.quiz_id AND qa.created_at >= ${dateFilter}
+      LEFT JOIN quiz_attempts qa ON qz.id = qa.quiz_id AND qa.start_time >= ${dateFilter}
       GROUP BY s.id
       ORDER BY s.name
-    `)
-      .all()
-
-    // Activity distribution
-    const activityStats = db
-      .prepare(`
-      SELECT 
-        CASE 
-          WHEN quiz_count >= 10 THEN 'high'
-          WHEN quiz_count >= 3 THEN 'medium'
-          ELSE 'low'
-        END as activity_level,
-        COUNT(*) as user_count
-      FROM (
-        SELECT 
-          u.id,
-          COUNT(qa.id) as quiz_count
-        FROM users u
-        LEFT JOIN quiz_attempts qa ON u.id = qa.user_id AND qa.created_at >= ${dateFilter}
-        GROUP BY u.id
-      ) user_activity
-      GROUP BY activity_level
-    `)
-      .all()
-
-    overview.highActivity = activityStats.find((a) => a.activity_level === "high")?.user_count || 0
-    overview.mediumActivity = activityStats.find((a) => a.activity_level === "medium")?.user_count || 0
-    overview.lowActivity = activityStats.find((a) => a.activity_level === "low")?.user_count || 0
+    `,
+    )
 
     return NextResponse.json({
       overview,
-      quizzes: quizzesData,
+      quizzes,
       battles,
       users,
       subjects,

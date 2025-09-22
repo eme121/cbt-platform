@@ -30,20 +30,23 @@ export default function QuizPage() {
   }, [])
 
   useEffect(() => {
-    let timer
-    if (quizStarted && timeLeft > 0 && !quizCompleted) {
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            handleSubmitQuiz()
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
+    if (!quizStarted || quizCompleted) {
+      return
     }
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          handleSubmitQuiz()
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
     return () => clearInterval(timer)
-  }, [quizStarted, timeLeft, quizCompleted])
+  }, [quizStarted, quizCompleted])
 
   const checkAuth = async () => {
     const token = localStorage.getItem("cbt_token")
@@ -103,7 +106,7 @@ export default function QuizPage() {
         setCurrentQuiz(data.quiz)
         setCurrentQuestion(0)
         setAnswers({})
-        setTimeLeft(quiz.time_limit * 60) // Convert minutes to seconds
+        setTimeLeft(data.quiz.time_limit * 60) // Convert minutes to seconds
         setQuizStarted(true)
         setQuizCompleted(false)
         setQuizResult(null)

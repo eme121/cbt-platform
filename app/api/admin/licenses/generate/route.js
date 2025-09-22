@@ -13,16 +13,18 @@ export async function POST(request) {
 
     const { count } = await request.json()
     const licenseCount = Math.min(Math.max(1, count), 100) // Limit between 1-100
+    const generatedKeys = []
 
     for (let i = 0; i < licenseCount; i++) {
       const licenseKey = generateLicenseKey()
       const expiresAt = new Date()
       expiresAt.setFullYear(expiresAt.getFullYear() + 1) // 1 year expiry
 
-      licenseQueries.create.run(licenseKey, expiresAt.toISOString())
+      await licenseQueries.create(licenseKey, licenseKey, tokenResult.user.userId, expiresAt.toISOString())
+      generatedKeys.push(licenseKey)
     }
 
-    return Response.json({ success: true, count: licenseCount })
+    return Response.json({ success: true, keys: generatedKeys })
   } catch (error) {
     console.error("Generate licenses error:", error)
     return Response.json({ success: false, message: "Internal server error" }, { status: 500 })

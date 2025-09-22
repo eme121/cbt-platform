@@ -28,20 +28,13 @@ export default function AdminDashboard() {
   const [subjects, setSubjects] = useState([])
   const [stats, setStats] = useState({})
   const [message, setMessage] = useState("")
+  const [licenseUser, setLicenseUser] = useState(null)
+  const [newLicense, setNewLicense] = useState(null)
+  const [editingSubject, setEditingSubject] = useState(null)
+  const [subjectToDelete, setSubjectToDelete] = useState(null)
+  const [newUser, setNewUser] = useState({ username: "", email: "", password: "", fullName: "", role: "student" })
+  const [newSubject, setNewSubject] = useState({ name: "", description: "" })
 
-  // Form states
-  const [newUser, setNewUser] = useState({
-    username: "",
-    email: "",
-    password: "",
-    fullName: "",
-    role: "student",
-  })
-  const [newSubject, setNewSubject] = useState({
-    name: "",
-    description: "",
-  })
-  const [licenseCount, setLicenseCount] = useState(1)
 
   useEffect(() => {
     checkAuth()
@@ -116,7 +109,6 @@ export default function AdminDashboard() {
       const data = await response.json()
       if (data.success) {
         setMessage("User created successfully")
-        setNewUser({ username: "", email: "", password: "", fullName: "", role: "student" })
         loadDashboardData()
       } else {
         setMessage(data.message || "Failed to create user")
@@ -142,7 +134,6 @@ export default function AdminDashboard() {
       const data = await response.json()
       if (data.success) {
         setMessage("Subject created successfully")
-        setNewSubject({ name: "", description: "" })
         loadDashboardData()
       } else {
         setMessage(data.message || "Failed to create subject")
@@ -152,29 +143,7 @@ export default function AdminDashboard() {
     }
   }
 
-  const generateLicenses = async () => {
-    try {
-      const token = localStorage.getItem("cbt_token")
-      const response = await fetch("/api/admin/licenses/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ count: licenseCount }),
-      })
 
-      const data = await response.json()
-      if (data.success) {
-        setMessage(`Generated ${licenseCount} license keys`)
-        loadDashboardData()
-      } else {
-        setMessage(data.message || "Failed to generate licenses")
-      }
-    } catch (error) {
-      setMessage("Network error occurred")
-    }
-  }
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
@@ -200,6 +169,92 @@ export default function AdminDashboard() {
       }
     } catch (error) {
       setMessage("Failed to update user status")
+    }
+  }
+
+  const generateLicenseForUser = async (user) => {
+    if (!user || !user.product_key) {
+      setMessage("This user does not have a product key.")
+      return
+    }
+
+    try {
+      const token = localStorage.getItem("cbt_token")
+      const response = await fetch("/api/admin/licenses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ productKey: user.product_key }),
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setNewLicense(data.licenseKey)
+        setMessage("License generated successfully!")
+        loadDashboardData() // Refresh the main license table
+      } else {
+        setMessage(data.message || "Failed to generate license.")
+      }
+    } catch (error) {
+      setMessage("A network error occurred.")
+    }
+  }
+
+  const handleUpdateSubject = async (e) => {
+    e.preventDefault()
+    if (!editingSubject) return
+
+    const updatedData = {
+      name: e.target.elements.editSubjectName.value,
+      description: e.target.elements.editSubjectDescription.value,
+    }
+
+    try {
+      const token = localStorage.getItem("cbt_token")
+      const response = await fetch(`/api/admin/subjects/${editingSubject.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(updatedData),
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage("Subject updated successfully")
+        setEditingSubject(null)
+        loadDashboardData()
+      } else {
+        setMessage(data.message || "Failed to update subject")
+      }
+    } catch (error) {
+      setMessage("Network error occurred")
+    }
+  }
+
+  const confirmDeleteSubject = async () => {
+    if (!subjectToDelete) return
+
+    try {
+      const token = localStorage.getItem("cbt_token")
+      const response = await fetch(`/api/admin/subjects/${subjectToDelete.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage("Subject deleted successfully")
+        setSubjectToDelete(null)
+        loadDashboardData()
+      } else {
+        setMessage(data.message || "Failed to delete subject")
+      }
+    } catch (error) {
+      setMessage("Network error occurred")
     }
   }
 
@@ -273,6 +328,17 @@ export default function AdminDashboard() {
             <CardContent>
               <div className="text-2xl font-bold">{stats.totalAttempts || 0}</div>
               <p className="text-xs text-muted-foreground">This month</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Battle Wins</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.totalWins || 0}</div>
+              <p className="text-xs text-muted-foreground">{stats.winRate || 0}% win rate</p>
             </CardContent>
           </Card>
         </div>
@@ -418,6 +484,14 @@ export default function AdminDashboard() {
                             >
                               {user.is_active ? "Deactivate" : "Activate"}
                             </Button>
+                          <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setLicenseUser(user)}
+                            >
+                              <Key className="h-3 w-3 mr-1" />
+                              License
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -432,20 +506,7 @@ export default function AdminDashboard() {
           <TabsContent value="licenses" className="space-y-6">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-semibold">License Management</h2>
-              <div className="flex gap-4 items-center">
-                <Input
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={licenseCount}
-                  onChange={(e) => setLicenseCount(Number.parseInt(e.target.value))}
-                  className="w-20"
-                />
-                <Button onClick={generateLicenses}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Generate Licenses
-                </Button>
-              </div>
+
             </div>
 
             <Card>
@@ -551,10 +612,10 @@ export default function AdminDashboard() {
                         <p>Created: {new Date(subject.created_at).toLocaleDateString()}</p>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline">
+                        <Button size="sm" variant="outline" onClick={() => setEditingSubject(subject)}>
                           <Edit className="h-3 w-3" />
                         </Button>
-                        <Button size="sm" variant="outline">
+                        <Button size="sm" variant="outline" onClick={() => setSubjectToDelete(subject)}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -618,11 +679,95 @@ export default function AdminDashboard() {
           </TabsContent>
         </Tabs>
 
+        <Dialog open={!!licenseUser} onOpenChange={(open) => !open && setLicenseUser(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Generate License for {licenseUser?.full_name}</DialogTitle>
+              <DialogDescription>
+                This will generate a new, unique license key and associate it with this user's product key.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>User's Product Key</Label>
+                <Input value={licenseUser?.product_key || 'N/A'} readOnly />
+              </div>
+              {newLicense ? (
+                <div>
+                  <Label>New License Key</Label>
+                  <div className="flex items-center gap-3">
+                    <Input value={newLicense} readOnly className="font-mono text-sm" />
+                    <Button variant="outline" size="sm" onClick={() => copyToClipboard(newLicense)}>
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button onClick={() => generateLicenseForUser(licenseUser)} className="w-full">
+                  Confirm & Generate Key
+                </Button>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Subject Dialog */}
+        <Dialog open={!!editingSubject} onOpenChange={(open) => !open && setEditingSubject(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Subject</DialogTitle>
+              <DialogDescription>Update the details for the subject: {editingSubject?.name}</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleUpdateSubject} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="editSubjectName">Subject Name</Label>
+                <Input
+                  id="editSubjectName"
+                  defaultValue={editingSubject?.name}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editSubjectDescription">Description</Label>
+                <Input
+                  id="editSubjectDescription"
+                  defaultValue={editingSubject?.description}
+                />
+              </div>
+              <Button type="submit" className="w-full">
+                Save Changes
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Subject Dialog */}
+        <Dialog open={!!subjectToDelete} onOpenChange={(open) => !open && setSubjectToDelete(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Are you sure?</DialogTitle>
+              <DialogDescription>
+                This will permanently delete the subject "{subjectToDelete?.name}" and all of its associated questions, quizzes, and battles. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-4">
+              <Button variant="outline" onClick={() => setSubjectToDelete(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDeleteSubject}>
+                Confirm Delete
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {message && (
           <Alert className="mt-4">
             <AlertDescription>{message}</AlertDescription>
           </Alert>
         )}
+
       </div>
     </div>
   )

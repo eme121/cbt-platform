@@ -50,7 +50,14 @@ export default function QuestionBankPage() {
 
   useEffect(() => {
     checkAuth()
+    loadSubjects()
   }, [])
+
+  useEffect(() => {
+    if (user) {
+      fetchQuestions()
+    }
+  }, [user, selectedSubject])
 
   const checkAuth = async () => {
     const token = localStorage.getItem("cbt_token")
@@ -71,7 +78,6 @@ export default function QuestionBankPage() {
           return
         }
         setUser(userData)
-        await loadData()
       } else {
         localStorage.removeItem("cbt_token")
         window.location.href = "/"
@@ -84,20 +90,25 @@ export default function QuestionBankPage() {
     }
   }
 
-  const loadData = async () => {
+  const loadSubjects = async () => {
     try {
       const token = localStorage.getItem("cbt_token")
       const headers = { Authorization: `Bearer ${token}` }
-
-      const [questionsRes, subjectsRes] = await Promise.all([
-        fetch("/api/questions", { headers }),
-        fetch("/api/subjects", { headers }),
-      ])
-
-      if (questionsRes.ok) setQuestions(await questionsRes.json())
+      const subjectsRes = await fetch("/api/subjects", { headers })
       if (subjectsRes.ok) setSubjects(await subjectsRes.json())
     } catch (error) {
-      console.error("Failed to load data:", error)
+      console.error("Failed to load subjects:", error)
+    }
+  }
+
+  const fetchQuestions = async () => {
+    try {
+      const token = localStorage.getItem("cbt_token")
+      const headers = { Authorization: `Bearer ${token}` }
+      const questionsRes = await fetch(`/api/questions?subjectId=${selectedSubject}`, { headers })
+      if (questionsRes.ok) setQuestions(await questionsRes.json())
+    } catch (error) {
+      console.error("Failed to load questions:", error)
     }
   }
 
@@ -161,7 +172,7 @@ export default function QuestionBankPage() {
         setMessage(editingQuestion ? "Question updated successfully" : "Question created successfully")
         setIsDialogOpen(false)
         resetForm()
-        loadData()
+        fetchQuestions()
       } else {
         setMessage(data.message || "Failed to save question")
       }
@@ -202,7 +213,7 @@ export default function QuestionBankPage() {
       const data = await response.json()
       if (data.success) {
         setMessage("Question deleted successfully")
-        loadData()
+        fetchQuestions()
       } else {
         setMessage(data.message || "Failed to delete question")
       }
@@ -218,11 +229,10 @@ export default function QuestionBankPage() {
   }
 
   const filteredQuestions = questions.filter((question) => {
-    const matchesSubject = selectedSubject === "all" || question.subject_id.toString() === selectedSubject
     const matchesSearch =
       question.question_text.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      question.subject_name.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesSubject && matchesSearch
+      (question.subject_name && question.subject_name.toLowerCase().includes(searchTerm.toLowerCase()))
+    return matchesSearch
   })
 
   if (loading) {

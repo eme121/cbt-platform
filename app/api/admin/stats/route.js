@@ -19,6 +19,10 @@ export async function GET(request) {
     const totalSubjects = db.prepare("SELECT COUNT(*) as count FROM subjects").get().count
     const totalQuestions = db.prepare("SELECT COUNT(*) as count FROM questions WHERE is_active = true").get().count
     const totalAttempts = db.prepare("SELECT COUNT(*) as count FROM quiz_attempts").get().count
+    const totalBattles = db.prepare("SELECT COUNT(*) as count FROM battles WHERE status = 'completed'").get().count
+    const totalWins = db.prepare("SELECT SUM(battles_won) as count FROM user_stats").get().count
+    const winRate = totalBattles > 0 ? (totalWins / totalBattles) * 100 : 0
+
 
     // Weekly stats
     const weekAgo = new Date()
@@ -42,6 +46,9 @@ export async function GET(request) {
       totalSubjects,
       totalQuestions,
       totalAttempts,
+      totalBattles,
+      totalWins,
+      winRate: winRate.toFixed(2),
       newUsersThisWeek,
       activeUsersToday,
       dbSize: "N/A",
